@@ -1,8 +1,12 @@
 import doctest
 import concurrent.futures
+import logging
 import networkx as nx
 import numpy as np
 from networkx.algorithms import cycles
+LOG_FORMAT= "%(levelname)s, time: %(asctime)s , line: %(lineno)d - %(message)s"
+logging.basicConfig(filename="logging.log",level=logging.DEBUG,format=LOG_FORMAT)
+logger = logging.getLogger()
 import time
 
 """REUT HADAD & TAL SOMECH"""
@@ -22,7 +26,7 @@ link:http://eprints.gla.ac.uk/25732/
 """
 
 
-def maximum_weight_cycle_packing(graph: nx.DiGraph, k: int) -> list:
+def maximum_weight_cycle_packing_improved(graph: nx.DiGraph, k: int,imp) -> list:
     """
     Algorithm - the algorithm finds the exact maximum weight k-way exchanges using reduction from directed graph to non directed
     graph
@@ -50,17 +54,17 @@ def maximum_weight_cycle_packing(graph: nx.DiGraph, k: int) -> list:
     >>> Digraph=nx.DiGraph()
     >>> Digraph.add_nodes_from([1,2,3,5,6,7,8])
     >>> Digraph.add_weighted_edges_from([(1,8,2),(8,1,4),(2,1,5),(1,3,4),(3,8,2),(8,2,3),(8,5,4),(5,7,3),(7,6,2),(6,5,4)])
-    >>> print(len(maximum_weight_cycle_packing(Digraph,3))) #[1,8,2] [6,5,7] [1,3,8] , can be only 2 but in any order
+    >>> print(len(maximum_weight_cycle_packing_improved(Digraph,3,"Process"))) #[1,8,2] [6,5,7] [1,3,8] , can be only 2 but in any order
     2
     >>> Digraph =nx.DiGraph()
     >>> Digraph.add_nodes_from([1,2,3,4])
     >>> Digraph.add_weighted_edges_from([(2,1,3),(1,3,1),(3,2,2),(3,4,5),(4,3,9)])
-    >>> print(len(maximum_weight_cycle_packing(Digraph,2)))#[3,4] or [4,3]
+    >>> print(len(maximum_weight_cycle_packing_improved(Digraph,2,"Process")))#[3,4] or [4,3]
     1
     >>> graphEX3 = nx.DiGraph()
     >>> graphEX3.add_nodes_from([10,11,12,13,14,15,16])
     >>> Digraph.add_weighted_edges_from([(10,11,10),(11,12,5),(12,13,6),(13,10,4),(11,14,2),(14,16,3),(16,15,8),(15,14,6)])
-    >>> print(maximum_weight_cycle_packing(graphEX3, 3))
+    >>> print(maximum_weight_cycle_packing_improved(graphEX3, 3"Thread"))
     []
 
     Notes
@@ -74,26 +78,34 @@ def maximum_weight_cycle_packing(graph: nx.DiGraph, k: int) -> list:
 
     Ys, cycles = create_Ys(graph, k)
 
-    X = []  # dict()
     max_cycles = []
     max_weight = 0
-    seen_Y = set()
-    max_graph = None
-    results = dict()
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # for Y in Ys:
-        Ys_results = [executor.submit(get_exchanges, Y, graph) for Y in Ys]
-        for res in concurrent.futures.as_completed(Ys_results):
-            exchange_res = res.result()
-            weight = exchange_res[0]
-            if weight > max_weight:
-                max_cycles = exchange_res[1]
-                max_weight = weight
+    if imp == "Threads":
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # for Y in Ys:
+            Ys_results = [executor.submit(get_exchanges, Y, graph) for Y in Ys]
+            for res in concurrent.futures.as_completed(Ys_results):
+                exchange_res = res.result()
+                weight = exchange_res[0]
+                if weight > max_weight:
+                    max_cycles = exchange_res[1]
+                    max_weight = weight
+    else:
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            # for Y in Ys:
+            Ys_results = [executor.submit(get_exchanges, Y, graph) for Y in Ys]
+            for res in concurrent.futures.as_completed(Ys_results):
+                exchange_res = res.result()
+                weight = exchange_res[0]
+                if weight > max_weight:
+                    max_cycles = exchange_res[1]
+                    max_weight = weight
     return max_cycles
 
 
 
 def get_exchanges(Y, graph):
+    logger.debug("Starting exchanges, Y: "+str(Y))
     X = []
     seen_Y = set()
     ans_graph = nx.Graph()
@@ -112,21 +124,20 @@ def get_exchanges(Y, graph):
         if edge[0] not in seen_Y and edge[0] not in X:
             X.append((edge[0]))
             ans_graph.add_node((edge[0]))
-    #with concurrent.futures.ThreadPool() as exct:
     with concurrent.futures.ThreadPoolExecutor() as exect:
         exect.submit(connect_2cycles, X, graph, ans_graph)
         exect.submit(connect_3cycles, X, Y, graph, ans_graph)
-    # connect_2cycles(X, graph, ans_graph)
-    # connect_3cycles(X, Y, graph, ans_graph)
     exchanges = list(nx.max_weight_matching(ans_graph))
     if len(exchanges) == 0 and ans_graph.number_of_edges() == 1:  # for the use-case of only self connected edge
         exchanges = [list(ans_graph.edges)[0]]
     final_cycles = []
     temp_max = 0
+    logger.info("finishing exchanges, Y: "+Y)
     for cyc in exchanges:
         ed = ans_graph.get_edge_data(cyc[0], cyc[1])
         temp_max = temp_max + ed["weight"]
         final_cycles.append(ed["cycle"])
+    #Log.debug("finishing exchanges, Y: "+Y)
     return temp_max, final_cycles
 
 
@@ -235,14 +246,7 @@ def create_Ys(graph, k):
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # itertools.ne
-    Digraph = nx.DiGraph()
-    Digraph.add_nodes_from([1, 2, 3, 5, 6, 7, 8])
-    Digraph.add_weighted_edges_from(
-        [(1, 8, 2), (8, 1, 4), (2, 1, 5), (1, 3, 4), (3, 8, 2), (8, 2, 3), (8, 5, 4), (5, 7, 3), (7, 6, 2), (6, 5, 4)])
-    start = time.perf_counter()
-    print(len(maximum_weight_cycle_packing(Digraph, 3)))  # [1,8,2] [6,5,7] [1,3,8] , can be only 2 but in any order
-    finish = time.perf_counter()
-    print(f'Finished in {round(finish - start, 2)}')
-    #doctest.testmod()
+
+    doctest.testmod()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
